@@ -1,6 +1,7 @@
 """Run modes: task (single operator), team (recon/web/reporter), chat (interactive)."""
 
 import asyncio
+import re
 from pathlib import Path
 
 from autogen_agentchat.teams import SelectorGroupChat
@@ -23,6 +24,26 @@ def is_advice(msg: str) -> bool:
     """True when the message is a 'what next / recommend' style question."""
     low = msg.lower().strip()
     return any(h in low for h in _ADVICE_HINTS)
+
+
+_EXPLOIT_HINTS = ("exploit", "dump", "pentest", "pen test", "pen-test", "hack",
+                  "sqli", "sql injection", "find sql", "find vuln", "find a vuln",
+                  "scan for vuln", "break in", "dump database", "dump the database",
+                  "dump all", "all database", "full scan", "owasp")
+_URL_RE = re.compile(r"https?://[^\s'\"]+")
+
+
+def is_exploit_intent(msg: str) -> bool:
+    """True for a full-engagement/exploit request better served by the deterministic
+    hunt engine than by the flaky 7B operator (which skips sql_test, hallucinates)."""
+    low = msg.lower()
+    return any(h in low for h in _EXPLOIT_HINTS)
+
+
+def extract_target(msg: str) -> str:
+    """Pull an http(s) URL out of a message, or '' if none."""
+    m = _URL_RE.search(msg)
+    return m.group(0) if m else ""
 
 
 def has_analyst(cfg: Config) -> bool:
@@ -118,10 +139,24 @@ async def run_chat(cfg: Config) -> None:
     operator = make_operator(client, build_tools(cfg), targets=_scope_targets(cfg))
     print("redagent chat — type 'exit' to quit.")
     loop = asyncio.get_event_loop()
+    last_target = ""
     while True:
         msg = await loop.run_in_executor(None, input, "\nyou> ")
         if msg.strip().lower() in ("exit", "quit"):
             break
+        if (u := extract_target(msg)):
+            last_target = u
+        # Exploit/full-engagement intent -> deterministic hunt (the 7B operator
+        # skips sql_test and hallucinates). Needs a target URL.
+        if is_exploit_intent(msg):
+            target = extract_target(msg) or last_target
+            if target:
+                from . import hunt
+                print("\n[routing to hunt — deterministic sql_test → dump]")
+                await loop.run_in_executor(None, hunt.run_hunt, target, cfg)
+            else:
+                print("\n[give a target, e.g.  hunt http://localhost:3001]")
+            continue
         # Advice questions go to the DeepHat analyst (better security reasoning, no
         # tools); fall back to the qwen operator with a strategist prompt if no
         # dedicated analyst is configured. Everything else drives tools via qwen.

@@ -12,7 +12,8 @@ from .config import Config
 from .llm import make_client
 from .tools import build_tools
 from .agents import make_operator
-from .modes import _scope_targets, expand_advice, is_advice, has_analyst
+from .modes import (_scope_targets, expand_advice, is_advice, has_analyst,
+                    is_exploit_intent, extract_target)
 
 _HELP = (
     "[b]commands[/b] (slash optional): hunt <url>  advise [q]  scope  report  clear  help  quit   "
@@ -69,6 +70,7 @@ class RedagentTUI(App):
         self.busy = False
         self._status = "working…"
         self._spin_i = 0
+        self._last_target = ""   # remembered for exploit-intent routing to hunt
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -120,7 +122,21 @@ class RedagentTUI(App):
         if self.busy:
             log.write("[red]busy — wait for the current task to finish.[/]")
             return
+        if (u := extract_target(msg)):
+            self._last_target = u
         log.write(f"[bold cyan]you[/] {_rich_escape(msg)}")
+        # Exploit/full-engagement intent -> the deterministic hunt engine (the 7B
+        # operator skips sql_test and hallucinates). Needs a target URL.
+        if is_exploit_intent(msg):
+            target = extract_target(msg) or self._last_target
+            if target:
+                log.write("[dim]→ exploitation task — routing to the deterministic "
+                          "hunt engine (reliable sql_test → dump).[/]")
+                self.run_hunt_tui(target)
+            else:
+                log.write("[yellow]give a target for a full exploit run, e.g.[/] "
+                          "hunt http://localhost:3001")
+            return
         # Advice questions -> DeepHat analyst (if configured); else qwen operator.
         if is_advice(msg) and has_analyst(self.cfg):
             self.run_advise(msg)
@@ -148,8 +164,10 @@ class RedagentTUI(App):
             elif self.busy:
                 log.write("[red]busy — wait for the current task to finish.[/]")
             else:
-                log.write(f"[bold cyan]you[/] hunt {_rich_escape(parts[1])}")
-                self.run_hunt_tui(parts[1].strip().strip('"\''))
+                tgt = parts[1].strip().strip('"\'')
+                self._last_target = tgt
+                log.write(f"[bold cyan]you[/] hunt {_rich_escape(tgt)}")
+                self.run_hunt_tui(tgt)
         elif cmd == "/advise":
             if self.busy:
                 log.write("[red]busy — wait for the current task to finish.[/]")
