@@ -280,9 +280,18 @@ def build_tools(cfg):
             return "error: nikto not installed (sudo pacman -S nikto)"
         out = _run(["nikto", "-h", url, "-ask", "no", "-nointeractive",
                     "-maxtime", "120s"], timeout=150)
+        # Real findings are "+ " lines minus the run banner/summary. Mid-scan
+        # "ERROR:" lines are normal, so don't let them nuke a valid result.
+        skip = ("Target ", "Start Time", "End Time", "host(s) tested",
+                "requests:", "Nikto v", "No CGI", "Platform:", "Server:")
         keep = [ln for ln in out.splitlines()
-                if ln.startswith("+ ") and "0 host(s) tested" not in ln]
-        return "\n".join(keep)[:3000] or "(no notable nikto findings)"
+                if ln.startswith("+ ") and not any(s in ln for s in skip)]
+        if keep:
+            return "\n".join(keep)[:3000]
+        # No findings — did it even run? (e.g. missing perl-xml-writer)
+        if "Required module" in out or not out.strip() or out.strip().startswith("(exit"):
+            return f"nikto error (did not run): {out.strip()[:300]}"
+        return "(no notable nikto findings)"
 
     def wpscan_scan(url: str) -> str:
         """Scan an in-scope WordPress site for vulnerable core/plugins/themes and
