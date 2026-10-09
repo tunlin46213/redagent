@@ -37,7 +37,7 @@ tool_timeout: 300
 # relative to this file. Unset/missing -> the bundled curated list (281 paths, fast).
 # A big list (SecLists) is far more thorough but much slower — mind the 7B time budget.
 # Install SecLists from the AUR (yay -S seclists) or: git clone https://github.com/danielmiessler/SecLists
-wordlist: "/usr/share/seclists/Discovery/Web-Content/raft-medium-directories.txt"
+# wordlist: "/usr/share/seclists/Discovery/Web-Content/raft-medium-directories.txt"  # uncomment for a THOROUGH (slow, 30k) scan
 
 # Optional: authenticated-flow creds so `hunt` can capture a session JWT and
 # analyse it. The login_url must be in scope. Omit this block for an
