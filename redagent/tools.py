@@ -300,8 +300,8 @@ def build_tools(cfg):
 
     def testssl_scan(target: str) -> str:
         """Check an in-scope HTTPS endpoint's TLS config for weak protocols,
-        ciphers, and cert issues with testssl.sh. Input: host:port (e.g.
-        example.com:443). Only meaningful for TLS/HTTPS services."""
+        ciphers, and cert issues with testssl.sh. Input: the in-scope target as
+        host:port (e.g. localhost:443). Only meaningful for TLS/HTTPS services."""
         try:
             cfg.scope.check(target)
         except ScopeError as e:

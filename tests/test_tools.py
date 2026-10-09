@@ -86,3 +86,11 @@ def test_jwt_strong_secret_not_cracked():
 
 def test_jwt_rejects_non_token():
     assert "error" in _tools()["jwt_test"]("not-a-jwt").lower()
+
+
+def test_no_placeholder_host_in_tool_docstrings():
+    # the 7B copies example URLs from tool docstrings — keep placeholder hosts out
+    for name, fn in _tools().items():
+        doc = (fn.__doc__ or "").lower()
+        for ph in ("example.com", "example.org", "example.net", "yourhost", "yourdomain"):
+            assert ph not in doc, f"{name} docstring leaks placeholder host {ph!r}"
