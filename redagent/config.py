@@ -51,6 +51,16 @@ class Config:
         self.workspace.mkdir(exist_ok=True)
         self.tool_timeout = int(data.get("tool_timeout", 300))
 
+        # Optional dir_bruteforce wordlist override (e.g. a SecLists path for a
+        # thorough scan). Absolute, or relative to the config file. Falls back to
+        # the bundled curated list if unset or the path does not exist.
+        wl = str(data.get("wordlist", "")).strip()
+        if wl:
+            p = Path(wl) if wl.startswith("/") else (root / wl)
+            self.wordlist = str(p) if p.exists() else ""
+        else:
+            self.wordlist = ""
+
         # Optional authenticated-flow creds (for capturing a session JWT). The
         # login target must still be in scope. None = unauthenticated engagement.
         auth = data.get("auth") or {}

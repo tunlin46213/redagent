@@ -63,7 +63,9 @@ def _nmap_trim(out: str) -> str:
 
 def build_tools(cfg):
     WS: Path = cfg.workspace
-    WORDLIST = Path(__file__).resolve().parent / "wordlists" / "common_paths.txt"
+    # Config override (e.g. SecLists) wins; else the bundled curated list.
+    WORDLIST = (Path(cfg.wordlist) if getattr(cfg, "wordlist", "")
+                else Path(__file__).resolve().parent / "wordlists" / "common_paths.txt")
 
     def _safe_path(path: str) -> Path:
         p = (WS / path).resolve()
