@@ -63,9 +63,31 @@ def _nmap_trim(out: str) -> str:
 
 def build_tools(cfg):
     WS: Path = cfg.workspace
-    # Config override (e.g. SecLists) wins; else the bundled curated list.
-    WORDLIST = (Path(cfg.wordlist) if getattr(cfg, "wordlist", "")
-                else Path(__file__).resolve().parent / "wordlists" / "common_paths.txt")
+    # The bundled curated list carries the deep, app-specific paths (e.g.
+    # rest/products/search) a generic SecLists list lacks. When an override is set,
+    # MERGE both (curated first, deduped) so a thorough scan keeps the deep paths
+    # AND gains the override's breadth — rather than replacing one with the other.
+    _BUNDLED_WL = Path(__file__).resolve().parent / "wordlists" / "common_paths.txt"
+    _override = getattr(cfg, "wordlist", "")
+    if _override and Path(_override).resolve() != _BUNDLED_WL.resolve():
+        seen, lines = set(), []
+        for src in (_BUNDLED_WL, Path(_override)):
+            try:
+                for ln in src.read_text(errors="ignore").splitlines():
+                    w = ln.strip()
+                    if w and w not in seen:
+                        seen.add(w)
+                        lines.append(w)
+            except Exception:
+                pass
+        try:
+            merged = WS / ".wordlist_merged.txt"
+            merged.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            WORDLIST = merged
+        except Exception:
+            WORDLIST = _BUNDLED_WL
+    else:
+        WORDLIST = _BUNDLED_WL
 
     def _safe_path(path: str) -> Path:
         p = (WS / path).resolve()

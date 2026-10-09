@@ -45,3 +45,19 @@ def test_missing_override_falls_back_to_empty(tmp_path):
           allowed_targets: [localhost]
     """)
     assert cfg.wordlist == ""   # graceful fallback -> bundled list
+
+
+def test_override_merges_with_curated_deduped(tmp_path):
+    from redagent import tools
+    wl = tmp_path / "breadth.txt"
+    wl.write_text("zzz_unique_breadth\nmedia\n")   # 'media' also in curated
+    cfg = _cfg(tmp_path, f"""
+        wordlist: "{wl}"
+        scope:
+          allowed_targets: [localhost]
+    """)
+    tools.build_tools(cfg)                           # triggers the merge
+    merged = (tmp_path / "workspace" / ".wordlist_merged.txt").read_text().splitlines()
+    assert "rest/products/search" in merged          # deep curated path kept
+    assert "zzz_unique_breadth" in merged            # override breadth added
+    assert merged.count("media") == 1                # deduped across both
