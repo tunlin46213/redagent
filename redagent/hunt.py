@@ -240,6 +240,20 @@ def run_hunt(target: str, cfg: Config, emit=print) -> None:
     host = urlparse(base).hostname or ""
 
     emit(f"[hunt] target: {base}")
+    # Fail fast + clearly if the target is in scope but not actually serving HTTP,
+    # rather than running the whole worklist and reporting a misleading "0 findings".
+    try:
+        cfg.scope.check(base)
+    except Exception as e:
+        emit(f"[hunt] refused (out of scope): {e}")
+        return
+    try:
+        req = urllib.request.Request(base, headers={"User-Agent": "redagent"})
+        urllib.request.urlopen(req, timeout=8)
+    except Exception as e:
+        emit(f"[hunt] target unreachable: {base} is not serving HTTP ({e}). "
+             "Is it up? (docker start juice-shop)")
+        return
     emit("[hunt] recon: nmap_web_scan + dir_bruteforce ...")
     nmap = tools["nmap_web_scan"](host)
     if nmap.startswith("refused"):
