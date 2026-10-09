@@ -1,0 +1,30 @@
+[project]
+name = "redagent"
+version = "0.1.0"
+description = "Local, scope-enforced pentest agent (AutoGen + Ollama) with a chained hunt mode, Textual TUI, and a qwen+DeepHat hybrid."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "autogen-agentchat>=0.7.5",
+    "autogen-ext[openai]>=0.7.5",
+    "ddgs>=9.16.0",
+    "pyyaml>=6.0.3",
+    "textual>=0.58",
+]
+
+[project.scripts]
+redagent = "redagent.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["uv_build>=0.12.21,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

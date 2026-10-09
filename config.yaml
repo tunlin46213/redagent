@@ -1,0 +1,44 @@
+# redagent configuration
+#
+# scope.allowed_targets is the engagement scope (RoE). A tool call is only run
+# when its target matches an entry here. Localhost + RFC1918 are allowed by
+# default so lab testing (Juice Shop, DVWA) works with no changes. For an
+# AUTHORIZED external engagement, add the specific host/domain/CIDR you are
+# authorized to test — one entry per target, never 0.0.0.0/0.
+
+llm:
+  base_url: "http://localhost:11434/v1"   # Ollama (OpenAI-compatible)
+  api_key: "ollama"
+  model: "qwen2.5:7b"                      # tool-calling model (DeepHat can't do structured tools)
+  parallel_tool_calls: false              # one tool per turn (7B reliability)
+  # Optional security model for the findings review (plain text, no tools) — DeepHat
+  # fits here. Defaults to `model` if unset. `hunt` loads it once, after all scanning.
+  analyst_model: "hf.co/mradermacher/DeepHat-V1-7B-GGUF:Q4_K_M"
+  analyst_timeout: 300
+  deep_dive: false                        # analyst proposes follow-up tests the engine runs, then reviews (slower)
+
+scope:
+  allowed_targets:
+    - localhost
+    - 127.0.0.1
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    # --- authorized engagement targets go below (your RoE scope) ---
+    # Add a real target ONLY with written authorization. One host/domain/CIDR per
+    # line, never 0.0.0.0/0. Example:
+    # - example.com
+  authorized_until: ""                      # optional ISO date, e.g. "2026-12-31"
+
+workspace: "workspace"                      # where tools read/write and reports land
+tool_timeout: 300
+
+# Optional: authenticated-flow creds so `hunt` can capture a session JWT and
+# analyse it. The login_url must be in scope. Omit this block for an
+# unauthenticated engagement.
+# auth:
+#   login_url: "http://localhost:3001/rest/user/login"
+#   username: "user@example.com"
+#   password: "changeme"
+#   user_field: "email"        # the login body field for the username (default: email)
+#   pass_field: "password"     # the login body field for the password
