@@ -50,6 +50,9 @@ class Config:
         self.workspace = (root / data.get("workspace", "workspace")).resolve()
         self.workspace.mkdir(exist_ok=True)
         self.tool_timeout = int(data.get("tool_timeout", 300))
+        # Reuse a recent hunt's recon + findings for the same target instead of
+        # re-scanning from scratch each run. 0 = always fresh.
+        self.hunt_cache_ttl = int(data.get("hunt_cache_ttl", 3600))
 
         # Optional dir_bruteforce wordlist override (e.g. a SecLists path for a
         # thorough scan). Absolute, or relative to the config file. Falls back to

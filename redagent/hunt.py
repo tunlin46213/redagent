@@ -6,9 +6,11 @@ prioritisation live here in Python — deterministic — so the small model neve
 to plan a multi-step engagement itself. Scope is still enforced inside every tool.
 """
 
+import json
 import re
+import time
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse, urljoin
 
@@ -254,12 +256,28 @@ def run_hunt(target: str, cfg: Config, emit=print) -> None:
         emit(f"[hunt] target unreachable: {base} is not serving HTTP ({e}). "
              "Is it up? (docker start juice-shop)")
         return
-    emit("[hunt] recon: nmap_web_scan + dir_bruteforce ...")
-    nmap = tools["nmap_web_scan"](host)
-    if nmap.startswith("refused"):
-        emit(f"[hunt] {nmap}")
-        return
-    dirb = tools["dir_bruteforce"](base)
+    # Reuse a recent run's recon + findings for this target instead of scanning
+    # from scratch (and hammering the target) every time.
+    cache = _load_cache(cfg)
+    entry = cache.get(base)
+    fresh = bool(cfg.hunt_cache_ttl and entry
+                 and (time.time() - entry.get("ts", 0)) < cfg.hunt_cache_ttl)
+    findings: list[Finding] = []
+    seen: set[tuple[str, str]] = set()
+    if fresh:
+        age = int((time.time() - entry["ts"]) // 60)
+        emit(f"[hunt] reusing cached recon + {len(entry['findings'])} finding(s) "
+             f"({age}m old; set hunt_cache_ttl: 0 for a fresh scan).")
+        dirb = entry["dirb"]
+        findings = [Finding(**f) for f in entry["findings"]]
+        seen = {tuple(k) for k in entry["done"]}
+    else:
+        emit("[hunt] recon: nmap_web_scan + dir_bruteforce ...")
+        nmap = tools["nmap_web_scan"](host)
+        if nmap.startswith("refused"):
+            emit(f"[hunt] {nmap}")
+            return
+        dirb = tools["dir_bruteforce"](base)
 
     queue = seed_leads(base, dirb)
     token = _authenticate(cfg, base)
@@ -267,10 +285,10 @@ def run_hunt(target: str, cfg: Config, emit=print) -> None:
         emit(f"[hunt] authenticated — captured session JWT ({token[:18]}...)")
         queue.insert(0, Lead(token, "auth", "jwt_test",
                              "inspect captured session JWT", "high"))
-    emit(f"[hunt] {len(queue)} leads queued (severity-ordered).")
+    pending = [l for l in queue if (l.url, l.vuln_class) not in seen]
+    emit(f"[hunt] {len(queue)} leads queued; {len(pending)} new to test "
+         f"({len(seen)} already done).")
 
-    findings: list[Finding] = []
-    seen: set[tuple[str, str]] = set()
     step = 0
     while queue:
         lead = queue.pop(0)
@@ -330,6 +348,30 @@ def run_hunt(target: str, cfg: Config, emit=print) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(report, encoding="utf-8")
     emit(f"[hunt] {len(findings)} finding(s). report -> {out}")
+
+    # Persist recon + findings so a re-run reuses them (within hunt_cache_ttl).
+    if cfg.hunt_cache_ttl:
+        cache[base] = {
+            "ts": entry["ts"] if fresh else time.time(),
+            "dirb": dirb,
+            "findings": [asdict(f) for f in findings],
+            "done": sorted(list(k) for k in seen),
+        }
+        _save_cache(cfg, cache)
+
+
+def _load_cache(cfg) -> dict:
+    try:
+        return json.loads((Path(cfg.workspace) / ".hunt_cache.json").read_text())
+    except Exception:
+        return {}
+
+
+def _save_cache(cfg, data: dict) -> None:
+    try:
+        (Path(cfg.workspace) / ".hunt_cache.json").write_text(json.dumps(data))
+    except Exception:
+        pass
 
 
 def _deep_dive(cfg, base, tools, findings, seen, emit) -> str:
