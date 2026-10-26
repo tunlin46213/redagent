@@ -179,7 +179,15 @@ def _is_finding(lead: Lead, result: str) -> tuple[bool, str, str]:
     """(is_finding, severity, evidence) for a tool result."""
     r = result.lower()
     if lead.tool == "sql_test":
-        if "is vulnerable" in r or "parameter:" in r or "injectable" in r:
+        # sqlmap's heuristic ("might be injectable") and the dynamic probe are NOT a
+        # confirmation — require a real injection point (a Parameter block with a
+        # Type/Payload, or the explicit "is vulnerable"), and bail on an explicit
+        # negative, so a non-injectable param isn't reported as critical SQLi.
+        negative = ("does not appear to be" in r or "is not injectable" in r
+                    or "does not seem to be injectable" in r)
+        confirmed = ("is vulnerable" in r
+                     or ("parameter:" in r and ("payload:" in r or "type:" in r)))
+        if confirmed and not negative:
             ev = next((ln for ln in result.splitlines()
                        if "Payload:" in ln or "Parameter:" in ln), result[:200])
             return True, "critical", ev.strip()

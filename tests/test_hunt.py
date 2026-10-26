@@ -75,6 +75,22 @@ def test_is_finding_sql_test():
     assert hit and sev == "critical"
 
 
+def test_is_finding_sql_test_confirmed_block_without_vulnerable_word():
+    # a confirmed injection block (Parameter + Type/Payload) counts even without
+    # the literal "is vulnerable"
+    out = "Parameter: q (GET)\n    Type: boolean-based blind\n    Payload: q=apple' AND 1=1"
+    assert hunt._is_finding(Lead("u", "sqli", "sql_test", ""), out)[0]
+
+
+def test_is_finding_sql_test_ignores_heuristic_only():
+    # sqlmap's heuristic "might be injectable" + "does not appear to be dynamic" is
+    # NOT a confirmation — a non-injectable param must not be reported as SQLi
+    out = ("testing if GET parameter 'to' is dynamic\n"
+           "GET parameter 'to' does not appear to be dynamic\n"
+           "heuristic (basic) test shows that GET parameter 'to' might be injectable")
+    assert not hunt._is_finding(Lead("u", "sqli", "sql_test", ""), out)[0]
+
+
 def test_is_finding_vuln_scan_and_nikto():
     assert hunt._is_finding(Lead("u", "misconfig", "vuln_scan", ""),
                             "[prometheus-metrics] [http] [medium] u")[0]
