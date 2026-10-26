@@ -119,6 +119,36 @@ def _cors_verdict(sent_origin: str, acao: str | None, acac: str | None) -> str |
     return None
 
 
+def _header_audit(url: str, headers: dict) -> tuple[str, str] | None:
+    """Grade HTTP security headers into (severity, summary) or None. Pure/testable.
+    `headers` is the response header dict; HSTS is only expected over HTTPS, and a
+    CSP with frame-ancestors satisfies the X-Frame-Options check."""
+    h = {k.lower(): v for k, v in headers.items()}
+    csp = h.get("content-security-policy", "")
+    med, low = [], []
+    for key, label, tier in (
+        ("content-security-policy", "CSP", med),
+        ("x-frame-options", "X-Frame-Options", med),
+        ("x-content-type-options", "X-Content-Type-Options", low),
+        ("referrer-policy", "Referrer-Policy", low),
+    ):
+        if key == "x-frame-options" and "frame-ancestors" in csp.lower():
+            continue
+        if key not in h:
+            tier.append(label)
+    if url.lower().startswith("https://") and "strict-transport-security" not in h:
+        med.append("HSTS")
+    leaks = [n for n in ("server", "x-powered-by", "x-aspnet-version") if h.get(n)]
+    if not med and not low and not leaks:
+        return None
+    parts = []
+    if med or low:
+        parts.append("missing security headers: " + ", ".join(med + low))
+    if leaks:
+        parts.append("info-disclosure: " + ", ".join(f"{n}={h[n]}" for n in leaks))
+    return ("medium" if med else "low"), "; ".join(parts)
+
+
 def _naabu_ports(output: str) -> list[int]:
     """Parse naabu's 'host:port' lines into a sorted unique port list, ignoring
     its banner/log noise. Pure, so it is unit-tested directly."""
@@ -428,6 +458,28 @@ def build_tools(cfg):
         ports = _naabu_ports(out)
         return ", ".join(str(p) for p in ports) if ports else "(no open ports found)"
 
+    def security_headers(url: str) -> str:
+        """Audit an in-scope URL's HTTP security headers: flags missing CSP, HSTS
+        (HTTPS), X-Frame-Options, X-Content-Type-Options, Referrer-Policy, and
+        info-disclosure headers (Server / X-Powered-By). Input: a full in-scope URL."""
+        try:
+            cfg.scope.check(url)
+        except ScopeError as e:
+            return f"refused (out of scope): {e}"
+        req = urllib.request.Request(url, headers={"User-Agent": "redagent"})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                headers = dict(r.headers.items())
+        except urllib.error.HTTPError as e:
+            headers = dict(e.headers.items())
+        except Exception as e:
+            return f"fetch error: {e}"
+        verdict = _header_audit(url, headers)
+        if not verdict:
+            return "security headers OK (no notable gaps)"
+        sev, summary = verdict
+        return f"{sev.upper()}: {summary}"
+
     def cors_check(url: str) -> str:
         """Check an in-scope URL's CORS policy for misconfiguration: does it reflect
         an arbitrary Origin or 'null', or use '*' — and is Access-Control-Allow-
@@ -608,5 +660,6 @@ def build_tools(cfg):
         "nikto_scan": nikto_scan, "wpscan_scan": wpscan_scan,
         "testssl_scan": testssl_scan, "jwt_test": jwt_test,
         "secret_scan": secret_scan, "port_scan": port_scan, "cors_check": cors_check,
+        "security_headers": security_headers,
         "read_file": read_file, "write_file": write_file,
     }

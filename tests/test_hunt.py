@@ -95,6 +95,21 @@ def test_seed_leads_cors_baseline_and_auth():
     assert any("login" in l.url and l.severity == "high" for l in cors)
 
 
+def test_seed_leads_security_headers_baseline():
+    leads = hunt.seed_leads("http://localhost:3001", DIRB)
+    assert any(l.tool == "security_headers" and l.url == "http://localhost:3001"
+               for l in leads)
+
+
+def test_is_finding_security_headers():
+    hit, sev, ev = hunt._is_finding(
+        Lead("http://h/", "headers", "security_headers", ""),
+        "MEDIUM: missing security headers: CSP, HSTS")
+    assert hit and sev == "medium" and "headers" in ev
+    assert not hunt._is_finding(Lead("http://h/", "headers", "security_headers", ""),
+                                "security headers OK (no notable gaps)")[0]
+
+
 def test_is_finding_cors_check():
     hit, sev, ev = hunt._is_finding(
         Lead("http://h/", "cors", "cors_check", ""),

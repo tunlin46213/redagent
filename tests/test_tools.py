@@ -139,3 +139,23 @@ def test_cors_verdict_wildcard_and_null():
     # a properly scoped ACAO (echoes nothing attacker-controlled) is not a finding
     assert tools._cors_verdict("https://evil.example", "https://trusted.site", "true") is None
     assert tools._cors_verdict("https://evil.example", None, None) is None
+
+
+def test_header_audit_missing_csp_is_medium():
+    sev, summary = tools._header_audit("http://h/", {"X-Frame-Options": "DENY"})
+    assert sev == "medium" and "CSP" in summary
+
+
+def test_header_audit_https_flags_hsts_and_leaks():
+    sev, summary = tools._header_audit(
+        "https://h/", {"Content-Security-Policy": "default-src 'self'",
+                       "X-Frame-Options": "DENY", "Server": "nginx/1.0"})
+    assert sev == "medium" and "HSTS" in summary and "nginx/1.0" in summary
+
+
+def test_header_audit_frame_ancestors_satisfies_xfo_and_clean_is_none():
+    # CSP frame-ancestors covers X-Frame-Options; a fully-hardened response -> None
+    assert tools._header_audit("http://h/", {
+        "Content-Security-Policy": "frame-ancestors 'none'",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer"}) is None
