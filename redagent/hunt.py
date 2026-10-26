@@ -12,7 +12,7 @@ import time
 import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse, urljoin, parse_qsl
 
 from .config import Config
 from .tools import build_tools
@@ -49,8 +49,13 @@ def _base(target: str) -> str:
     return f"{p.scheme}://{p.netloc}"
 
 
-def seed_leads(base: str, dirb_output: str) -> list[Lead]:
-    """Turn recon output into a prioritised lead queue."""
+def seed_leads(base: str, dirb_output: str, crawl_output: str = "") -> list[Lead]:
+    """Turn recon output into a prioritised lead queue.
+
+    dirb_output is gobuster's path list; crawl_output (optional) is katana's
+    crawled URLs — its parameter-bearing endpoints become sql_test/xss_test leads
+    a wordlist alone would miss.
+    """
     leads = [
         Lead(base, "misconfig", "vuln_scan", "nuclei baseline scan", "medium"),
         Lead(base, "misconfig", "nikto_scan", "server misconfig/outdated software", "medium"),
@@ -83,6 +88,27 @@ def seed_leads(base: str, dirb_output: str) -> list[Lead]:
     if wordpress:
         leads.append(Lead(base, "wordpress", "wpscan_scan",
                           "WordPress detected — scan core/plugins/users", "high"))
+    # katana-crawled parameter endpoints -> sqli/xss leads. Dedup by endpoint
+    # signature (path + the set of param names) so many crawled URLs that differ
+    # only in values collapse to one sql_test/xss_test lead per real endpoint.
+    base_netloc = urlparse(base).netloc
+    seen_sig: set[tuple[str, tuple[str, ...]]] = set()
+    for line in crawl_output.splitlines():
+        u = line.strip()
+        if "?" not in u or not u.startswith(("http://", "https://")):
+            continue
+        pu = urlparse(u)
+        if pu.netloc != base_netloc:
+            continue
+        keys = tuple(sorted(k for k, _ in parse_qsl(pu.query)))
+        sig = (pu.path, keys)
+        if not keys or sig in seen_sig:
+            continue
+        seen_sig.add(sig)
+        leads.append(Lead(u, "sqli", "sql_test",
+                          f"crawled param endpoint {pu.path}", "high"))
+        leads.append(Lead(u, "xss", "xss_test",
+                          f"crawled reflected param {pu.path}", "medium"))
     leads.sort(key=lambda l: SEVERITY.get(l.severity, 2))
     return leads
 
@@ -269,17 +295,23 @@ def run_hunt(target: str, cfg: Config, emit=print) -> None:
         emit(f"[hunt] reusing cached recon + {len(entry['findings'])} finding(s) "
              f"({age}m old; set hunt_cache_ttl: 0 for a fresh scan).")
         dirb = entry["dirb"]
+        crawl = entry.get("crawl", "")
         findings = [Finding(**f) for f in entry["findings"]]
         seen = {tuple(k) for k in entry["done"]}
     else:
-        emit("[hunt] recon: nmap_web_scan + dir_bruteforce ...")
+        emit("[hunt] recon: nmap_web_scan + dir_bruteforce + web_crawl ...")
         nmap = tools["nmap_web_scan"](host)
         if nmap.startswith("refused"):
             emit(f"[hunt] {nmap}")
             return
         dirb = tools["dir_bruteforce"](base)
+        # katana crawl is best-effort extra coverage; a missing binary or error
+        # must not abort the hunt, so swallow anything that isn't real URLs.
+        crawl = tools["web_crawl"](base)
+        if crawl.startswith(("refused", "error", "(no")):
+            crawl = ""
 
-    queue = seed_leads(base, dirb)
+    queue = seed_leads(base, dirb, crawl)
     token = _authenticate(cfg, base)
     if token:
         emit(f"[hunt] authenticated — captured session JWT ({token[:18]}...)")
@@ -354,6 +386,7 @@ def run_hunt(target: str, cfg: Config, emit=print) -> None:
         cache[base] = {
             "ts": entry["ts"] if fresh else time.time(),
             "dirb": dirb,
+            "crawl": crawl,
             "findings": [asdict(f) for f in findings],
             "done": sorted(list(k) for k in seen),
         }

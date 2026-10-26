@@ -27,6 +27,26 @@ def test_seed_leads_classes_and_severity_order():
     assert sqli.url.endswith("/rest/products/search?q=apple")
 
 
+def test_seed_leads_from_crawl_params():
+    crawl = "\n".join([
+        "http://localhost:3001/rest/products/search?q=foo",   # param -> sqli+xss
+        "http://localhost:3001/rest/products/search?q=bar",   # same sig -> deduped
+        "http://localhost:3001/api/items?id=5&cat=x",         # distinct endpoint
+        "http://localhost:3001/about",                        # no param -> ignored
+        "http://evil.example/x?p=1",                          # off-host -> ignored
+    ])
+    leads = hunt.seed_leads("http://localhost:3001", "", crawl)
+    crawled = [l for l in leads if "crawled" in l.reason]
+    sqli = {l.url for l in crawled if l.vuln_class == "sqli"}
+    # one sqli lead per endpoint signature (the two ?q= URLs collapse to one)
+    assert sqli == {"http://localhost:3001/rest/products/search?q=foo",
+                    "http://localhost:3001/api/items?id=5&cat=x"}
+    # each crawled param endpoint seeds BOTH sqli and xss
+    assert {l.vuln_class for l in crawled} == {"sqli", "xss"}
+    # off-host and param-less URLs never become leads
+    assert not any("evil.example" in l.url or l.url.endswith("/about") for l in leads)
+
+
 def test_is_finding_sql_test():
     hit, sev, _ = hunt._is_finding(
         Lead("u", "sqli", "sql_test", ""),

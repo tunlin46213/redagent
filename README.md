@@ -20,8 +20,8 @@ uv tool install .            # installs the `redagent` command
 ```
 
 Needs Ollama up (models from `config.yaml`) and these on PATH: nmap, gobuster,
-sqlmap, dalfox, nuclei, curl. Optional: nikto, wpscan, testssl (each tool says so
-if its binary is missing).
+sqlmap, dalfox, nuclei, curl. Optional: katana (JS-aware crawler), nikto, wpscan,
+testssl (each tool says so if its binary is missing).
 
 ## Modes
 

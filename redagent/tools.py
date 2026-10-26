@@ -276,6 +276,38 @@ def build_tools(cfg):
                  if any(k in ln for k in ("[POC]", "[VULN]", "[G]", "[R]", "triggered", "reflected"))]
         return "\n".join(lines)[:3000] or "(no XSS reported)"
 
+    def web_crawl(url: str) -> str:
+        """Crawl an in-scope web app for real endpoints and parameters with katana
+        (JS-aware). Surfaces routes/params a wordlist misses, to feed sql_test/
+        xss_test. Input: a base URL. Param-bearing URLs are listed first."""
+        try:
+            cfg.scope.check(url)
+        except ScopeError as e:
+            return f"refused (out of scope): {e}"
+        if not _have("katana"):
+            return "error: katana not installed (copy from the kali sandbox or `go install github.com/projectdiscovery/katana/cmd/katana@latest`)"
+        # -fs fqdn keeps the crawl ON the target host (never fetches out-of-scope
+        # links it finds, e.g. a third-party CDN); depth 2 + JS crawl is a good
+        # time/coverage trade-off for a lab app.
+        out = _run(["katana", "-u", url, "-d", "2", "-jc", "-fs", "fqdn",
+                    "-c", "10", "-timeout", "10", "-silent", "-nc"], timeout=120)
+        host = urlparse(url).netloc
+        seen, params, other = set(), [], []
+        for ln in out.splitlines():
+            u = ln.strip()
+            if not u.startswith(("http://", "https://")):
+                continue
+            p = urlparse(u)
+            if p.netloc != host:                   # same host only (scope hygiene)
+                continue
+            if "{{" in u or "%7B%7B" in u:          # Angular/template placeholders
+                continue
+            if u in seen:
+                continue
+            seen.add(u)
+            (params if p.query else other).append(u)
+        return "\n".join(params + other)[:3000] or "(no endpoints crawled)"
+
     def read_file(path: str) -> str:
         """Read a text file from the workspace. Input: a relative filename."""
         try:
@@ -390,7 +422,7 @@ def build_tools(cfg):
         "web_search": web_search, "fetch_url": fetch_url, "http_request": http_request,
         "nmap_web_scan": nmap_web_scan, "dir_bruteforce": dir_bruteforce,
         "sql_test": sql_test, "sql_enumerate": sql_enumerate,
-        "vuln_scan": vuln_scan, "xss_test": xss_test,
+        "vuln_scan": vuln_scan, "xss_test": xss_test, "web_crawl": web_crawl,
         "nikto_scan": nikto_scan, "wpscan_scan": wpscan_scan,
         "testssl_scan": testssl_scan, "jwt_test": jwt_test,
         "read_file": read_file, "write_file": write_file,

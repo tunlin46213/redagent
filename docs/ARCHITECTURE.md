@@ -23,7 +23,7 @@ Two models work together:
 | `config.py` | 76 | Loads `config.yaml` → a `Config` object (model, scope, workspace, options). |
 | `scope.py` | 88 | The RoE guard. `Scope.check(target)` — allow / refuse, placeholder detection. |
 | `llm.py` | 17 | Builds the Ollama (OpenAI-compatible) client for the tool model. |
-| `tools.py` | 397 | The 15 tools. `build_tools(cfg)` returns `{name: fn}`, each scope-checked. |
+| `tools.py` | 420 | The 16 tools. `build_tools(cfg)` returns `{name: fn}`, each scope-checked. |
 | `agents.py` | 133 | AutoGen agent definitions: the operator + the recon/web/reporter team. |
 | `modes.py` | 171 | `task` / `team` / `chat` runners + intent routing (advice, exploit). |
 | `hunt.py` | 431 | The deterministic worklist engine (recon → leads → chain → report). |
@@ -61,7 +61,7 @@ target URL
   ├─ scope.check + HTTP reachability probe      (fail fast if down / out of scope)
   │
   ├─ cache?  reuse recon + findings if < hunt_cache_ttl, else:
-  │     recon:  nmap_web_scan + dir_bruteforce
+  │     recon:  nmap_web_scan + dir_bruteforce + web_crawl (katana)
   │
   ├─ seed_leads()  →  severity-ordered queue
   │     search→sqli/xss, sensitive-200→exposure, base→vuln_scan/nikto,
@@ -92,7 +92,7 @@ garbles tool calls, or skips the SQLi endpoint.
 ## Tools (`tools.py` → `build_tools(cfg)`)
 
 Every tool calls `cfg.scope.check()` first and returns `"refused (out of scope)"`
-otherwise. The 15 tools:
+otherwise. The 16 tools:
 
 | Tool | Backend | Purpose |
 |------|---------|---------|
@@ -101,6 +101,7 @@ otherwise. The 15 tools:
 | `http_request` | urllib | Any method/headers/body (IDOR, auth) |
 | `nmap_web_scan` | nmap | Open web ports + service versions (noise-trimmed) |
 | `dir_bruteforce` | gobuster | Endpoint discovery (curated or merged SecLists wordlist) |
+| `web_crawl` | katana | JS-aware crawl: real routes/params a wordlist misses (feeds sql/xss) |
 | `sql_test` | sqlmap | Detect SQL injection (clean-param, `--technique=BEU`) |
 | `sql_enumerate` | sqlmap | Post-exploit: dump DB tables (banner-filtered) |
 | `xss_test` | dalfox | Detect reflected XSS |
@@ -111,7 +112,7 @@ otherwise. The 15 tools:
 | `jwt_test` | pure-python | Decode JWT + flag alg:none / weak HMAC secret |
 | `read_file` / `write_file` | — | Workspace notes/reports |
 
-The three scanner binaries (nikto, wpscan, testssl) are optional; a tool returns
+The optional binaries (katana, nikto, wpscan, testssl) need not be installed; a tool returns
 a clear "not installed" message if its binary is missing.
 
 ---
@@ -212,4 +213,4 @@ redagent tui                     # interactive UI
 ```
 
 Requires Ollama running (with the configured models pulled) and, on PATH: nmap,
-gobuster, sqlmap, dalfox, nuclei, curl; optionally nikto, wpscan, testssl.
+gobuster, sqlmap, dalfox, nuclei, curl; optionally katana, nikto, wpscan, testssl.
