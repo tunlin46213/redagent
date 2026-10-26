@@ -99,6 +99,26 @@ def scan_secrets(text: str) -> list[tuple[str, str, str]]:
     return out
 
 
+def _cors_verdict(sent_origin: str, acao: str | None, acac: str | None) -> str | None:
+    """Grade one CORS probe into a labelled finding (or None). Pure/testable.
+    acao/acac are the Access-Control-Allow-Origin / -Credentials response headers."""
+    creds = (acac or "").strip().lower() == "true"
+    if acao and acao == sent_origin:
+        if sent_origin == "null":
+            return (("HIGH" if creds else "MEDIUM")
+                    + ": reflects 'null' Origin — a sandboxed iframe/file origin can read responses"
+                    + (" WITH credentials." if creds else "."))
+        if creds:
+            return (f"CRITICAL: reflects arbitrary Origin ({sent_origin}) with "
+                    "credentials — any site can read authenticated responses.")
+        return (f"HIGH: reflects arbitrary Origin ({sent_origin}) — any site can "
+                "read responses (no credentials).")
+    if acao == "*":
+        return ("MEDIUM: Access-Control-Allow-Origin: * — responses are world-readable"
+                + (" WITH credentials (invalid+dangerous)." if creds else " (no credentials)."))
+    return None
+
+
 def _naabu_ports(output: str) -> list[int]:
     """Parse naabu's 'host:port' lines into a sorted unique port list, ignoring
     its banner/log noise. Pure, so it is unit-tested directly."""
@@ -408,6 +428,43 @@ def build_tools(cfg):
         ports = _naabu_ports(out)
         return ", ".join(str(p) for p in ports) if ports else "(no open ports found)"
 
+    def cors_check(url: str) -> str:
+        """Check an in-scope URL's CORS policy for misconfiguration: does it reflect
+        an arbitrary Origin or 'null', or use '*' — and is Access-Control-Allow-
+        Credentials set (which turns a reflected Origin into cross-site theft of
+        authenticated data)? Input: a full in-scope URL."""
+        try:
+            cfg.scope.check(url)
+        except ScopeError as e:
+            return f"refused (out of scope): {e}"
+
+        def _probe(origin: str):
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "redagent", "Origin": origin})
+            try:
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    h = r.headers
+            except urllib.error.HTTPError as e:
+                h = e.headers
+            except Exception:
+                return (None, None)
+            return (h.get("Access-Control-Allow-Origin"),
+                    h.get("Access-Control-Allow-Credentials"))
+
+        evil = "https://evil.example"
+        findings = []
+        acao, acac = _probe(evil)
+        v = _cors_verdict(evil, acao, acac)
+        if v:
+            findings.append(v)
+        nacao, nacac = _probe("null")
+        v = _cors_verdict("null", nacao, nacac)
+        if v:
+            findings.append(v)
+        if not findings:
+            return f"no CORS misconfig (ACAO for {evil}: {acao or 'not returned'})"
+        return "\n".join(findings)
+
     def secret_scan(url: str) -> str:
         """Fetch an in-scope URL (e.g. an exposed .env / .bak / config / backup
         file) and scan its body for leaked secrets: private keys, cloud/API keys,
@@ -550,6 +607,6 @@ def build_tools(cfg):
         "web_fingerprint": web_fingerprint,
         "nikto_scan": nikto_scan, "wpscan_scan": wpscan_scan,
         "testssl_scan": testssl_scan, "jwt_test": jwt_test,
-        "secret_scan": secret_scan, "port_scan": port_scan,
+        "secret_scan": secret_scan, "port_scan": port_scan, "cors_check": cors_check,
         "read_file": read_file, "write_file": write_file,
     }

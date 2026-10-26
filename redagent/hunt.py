@@ -59,6 +59,7 @@ def seed_leads(base: str, dirb_output: str, crawl_output: str = "") -> list[Lead
     leads = [
         Lead(base, "misconfig", "vuln_scan", "nuclei baseline scan", "medium"),
         Lead(base, "misconfig", "nikto_scan", "server misconfig/outdated software", "medium"),
+        Lead(base, "cors", "cors_check", "baseline CORS policy check", "medium"),
     ]
     p = urlparse(base)
     if p.scheme == "https":
@@ -85,6 +86,9 @@ def seed_leads(base: str, dirb_output: str, crawl_output: str = "") -> list[Lead
         if any(k in low for k in ("login", "signin", "auth", "token", "session")):
             leads.append(Lead(url, "auth", "fetch_url",
                               f"auth surface {path} — capture token/response", "medium"))
+            # CORS on a credentialed auth endpoint is higher-value than on the root.
+            leads.append(Lead(url, "cors", "cors_check",
+                              f"CORS on auth endpoint {path}", "high"))
     if wordpress:
         leads.append(Lead(base, "wordpress", "wpscan_scan",
                           "WordPress detected — scan core/plugins/users", "high"))
@@ -159,6 +163,11 @@ def _is_finding(lead: Lead, result: str) -> tuple[bool, str, str]:
             sev = ("critical" if "critical:" in r
                    else "high" if "high:" in r else "medium")
             return True, sev, "leaked secret — " + result.replace("\n", "; ")[:220]
+    elif lead.tool == "cors_check":
+        if "critical:" in r or "high:" in r or "medium:" in r:
+            sev = ("critical" if "critical:" in r
+                   else "high" if "high:" in r else "medium")
+            return True, sev, "CORS — " + result.replace("\n", "; ")[:220]
     elif lead.tool == "fetch_url":
         if not result.startswith("HTTP 200"):
             return False, lead.severity, ""

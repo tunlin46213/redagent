@@ -23,7 +23,7 @@ Two models work together:
 | `config.py` | 76 | Loads `config.yaml` → a `Config` object (model, scope, workspace, options). |
 | `scope.py` | 88 | The RoE guard. `Scope.check(target)` — allow / refuse, placeholder detection. |
 | `llm.py` | 17 | Builds the Ollama (OpenAI-compatible) client for the tool model. |
-| `tools.py` | 525 | The 19 tools. `build_tools(cfg)` returns `{name: fn}`, each scope-checked. |
+| `tools.py` | 545 | The 20 tools. `build_tools(cfg)` returns `{name: fn}`, each scope-checked. |
 | `agents.py` | 133 | AutoGen agent definitions: the operator + the recon/web/reporter team. |
 | `modes.py` | 171 | `task` / `team` / `chat` runners + intent routing (advice, exploit). |
 | `hunt.py` | 431 | The deterministic worklist engine (recon → leads → chain → report). |
@@ -92,7 +92,7 @@ garbles tool calls, or skips the SQLi endpoint.
 ## Tools (`tools.py` → `build_tools(cfg)`)
 
 Every tool calls `cfg.scope.check()` first and returns `"refused (out of scope)"`
-otherwise. The 19 tools:
+otherwise. The 20 tools:
 
 | Tool | Backend | Purpose |
 |------|---------|---------|
@@ -113,6 +113,7 @@ otherwise. The 19 tools:
 | `testssl_scan` | testssl | TLS/HTTPS config |
 | `jwt_test` | pure-python | Decode JWT + flag alg:none / weak HMAC secret |
 | `secret_scan` | pure-python | Fetch an exposed file + flag leaked keys/tokens/JWTs/creds |
+| `cors_check` | pure-python | Probe CORS: reflected/null Origin + credentials = cross-site theft |
 | `read_file` / `write_file` | — | Workspace notes/reports |
 
 The optional binaries (katana, httpx, naabu, nikto, wpscan, testssl) need not be installed; a tool returns

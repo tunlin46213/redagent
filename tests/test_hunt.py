@@ -87,6 +87,23 @@ def test_exposure_labels_content_aware():
     assert "Prometheus" in ev3
 
 
+def test_seed_leads_cors_baseline_and_auth():
+    leads = hunt.seed_leads("http://localhost:3001", DIRB + "\nrest/user/login (Status: 200)")
+    cors = [l for l in leads if l.tool == "cors_check"]
+    # a baseline CORS check on the base, plus one on the discovered auth endpoint
+    assert any(l.url == "http://localhost:3001" for l in cors)
+    assert any("login" in l.url and l.severity == "high" for l in cors)
+
+
+def test_is_finding_cors_check():
+    hit, sev, ev = hunt._is_finding(
+        Lead("http://h/", "cors", "cors_check", ""),
+        "CRITICAL: reflects arbitrary Origin (https://evil.example) with credentials")
+    assert hit and sev == "critical" and "CORS" in ev
+    assert not hunt._is_finding(Lead("http://h/", "cors", "cors_check", ""),
+                                "no CORS misconfig (ACAO for https://evil.example: not returned)")[0]
+
+
 def test_is_finding_secret_scan():
     hit, sev, ev = hunt._is_finding(
         Lead("http://h/.env", "secret", "secret_scan", ""),

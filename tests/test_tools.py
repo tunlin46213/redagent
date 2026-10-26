@@ -121,3 +121,21 @@ def test_naabu_ports_parses_and_dedups():
            "scanning...\nbadline\n")
     assert tools._naabu_ports(out) == [80, 443, 3001]
     assert tools._naabu_ports("[INF] no ports\n") == []
+
+
+def test_cors_verdict_reflected_with_credentials_is_critical():
+    v = tools._cors_verdict("https://evil.example", "https://evil.example", "true")
+    assert v.startswith("CRITICAL:")
+
+
+def test_cors_verdict_reflected_no_credentials_is_high():
+    v = tools._cors_verdict("https://evil.example", "https://evil.example", None)
+    assert v.startswith("HIGH:")
+
+
+def test_cors_verdict_wildcard_and_null():
+    assert tools._cors_verdict("https://evil.example", "*", None).startswith("MEDIUM:")
+    assert tools._cors_verdict("null", "null", "true").startswith("HIGH:")
+    # a properly scoped ACAO (echoes nothing attacker-controlled) is not a finding
+    assert tools._cors_verdict("https://evil.example", "https://trusted.site", "true") is None
+    assert tools._cors_verdict("https://evil.example", None, None) is None
