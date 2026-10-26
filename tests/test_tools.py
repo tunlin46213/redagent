@@ -159,3 +159,19 @@ def test_header_audit_frame_ancestors_satisfies_xfo_and_clean_is_none():
         "Content-Security-Policy": "frame-ancestors 'none'",
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "no-referrer"}) is None
+
+
+def test_is_graphql_response_distinguishes_from_spa():
+    assert tools._is_graphql_response({"data": {"__typename": "Query"}})
+    assert tools._is_graphql_response({"errors": [{"message": "bad query"}]})
+    # an HTML SPA 200 (not JSON) or an empty/odd body is NOT GraphQL
+    assert not tools._is_graphql_response("<!doctype html>...")
+    assert not tools._is_graphql_response(None)
+    assert not tools._is_graphql_response({"data": {"products": []}})
+
+
+def test_graphql_type_count():
+    resp = {"data": {"__schema": {"types": [{"name": "Query"}, {"name": "User"}]}}}
+    assert tools._graphql_type_count(resp) == 2
+    assert tools._graphql_type_count({"data": {}}) is None
+    assert tools._graphql_type_count(None) is None

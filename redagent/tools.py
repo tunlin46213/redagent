@@ -119,6 +119,27 @@ def _cors_verdict(sent_origin: str, acao: str | None, acac: str | None) -> str |
     return None
 
 
+def _is_graphql_response(resp) -> bool:
+    """True if a parsed JSON response looks like a GraphQL reply (so an HTML SPA
+    catch-all returning 200 is NOT mistaken for a GraphQL endpoint). Pure."""
+    if not isinstance(resp, dict):
+        return False
+    data = resp.get("data")
+    if isinstance(data, dict) and "__typename" in data:
+        return True
+    errs = resp.get("errors")
+    return isinstance(errs, list) and len(errs) > 0
+
+
+def _graphql_type_count(schema_resp) -> int | None:
+    """Type count if an introspection response disclosed the schema, else None. Pure."""
+    try:
+        types = schema_resp["data"]["__schema"]["types"]
+    except (TypeError, KeyError):
+        return None
+    return len(types) if isinstance(types, list) else None
+
+
 def _header_audit(url: str, headers: dict) -> tuple[str, str] | None:
     """Grade HTTP security headers into (severity, summary) or None. Pure/testable.
     `headers` is the response header dict; HSTS is only expected over HTTPS, and a
@@ -458,6 +479,47 @@ def build_tools(cfg):
         ports = _naabu_ports(out)
         return ", ".join(str(p) for p in ports) if ports else "(no open ports found)"
 
+    def graphql_scan(url: str) -> str:
+        """Probe an in-scope URL for a GraphQL endpoint and check whether schema
+        introspection is enabled (schema disclosure aids further attacks). Input: a
+        GraphQL endpoint URL (http://host/graphql) or a base URL — common GraphQL
+        paths are tried. Detection is JSON-based, so an HTML SPA 200 is not a match."""
+        try:
+            cfg.scope.check(url)
+        except ScopeError as e:
+            return f"refused (out of scope): {e}"
+        p = urlparse(url)
+        candidates = [url]
+        if p.path in ("", "/"):
+            b = f"{p.scheme}://{p.netloc}"
+            candidates = [f"{b}/graphql", f"{b}/api/graphql", f"{b}/v1/graphql", f"{b}/query"]
+
+        def _post(endpoint: str, query: str):
+            req = urllib.request.Request(
+                endpoint, data=json.dumps({"query": query}).encode(), method="POST",
+                headers={"Content-Type": "application/json", "User-Agent": "redagent"})
+            try:
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    return json.loads(r.read(200000).decode("utf-8", "replace"))
+            except urllib.error.HTTPError as e:
+                try:
+                    return json.loads(e.read(200000).decode("utf-8", "replace"))
+                except Exception:
+                    return None
+            except Exception:
+                return None
+
+        for ep in candidates:
+            if not _is_graphql_response(_post(ep, "{__typename}")):
+                continue
+            schema = _post(ep, "query{__schema{queryType{name} types{name}}}")
+            n = _graphql_type_count(schema)
+            if n:
+                return (f"MEDIUM: GraphQL introspection enabled at {ep} — full "
+                        f"schema disclosed ({n} types).")
+            return f"GraphQL endpoint at {ep} (introspection disabled)."
+        return "no GraphQL endpoint found"
+
     def security_headers(url: str) -> str:
         """Audit an in-scope URL's HTTP security headers: flags missing CSP, HSTS
         (HTTPS), X-Frame-Options, X-Content-Type-Options, Referrer-Policy, and
@@ -660,6 +722,6 @@ def build_tools(cfg):
         "nikto_scan": nikto_scan, "wpscan_scan": wpscan_scan,
         "testssl_scan": testssl_scan, "jwt_test": jwt_test,
         "secret_scan": secret_scan, "port_scan": port_scan, "cors_check": cors_check,
-        "security_headers": security_headers,
+        "security_headers": security_headers, "graphql_scan": graphql_scan,
         "read_file": read_file, "write_file": write_file,
     }

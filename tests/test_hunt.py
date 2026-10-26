@@ -95,6 +95,20 @@ def test_seed_leads_cors_baseline_and_auth():
     assert any("login" in l.url and l.severity == "high" for l in cors)
 
 
+def test_seed_leads_graphql_baseline():
+    leads = hunt.seed_leads("http://localhost:3001", DIRB)
+    assert any(l.tool == "graphql_scan" and l.vuln_class == "graphql" for l in leads)
+
+
+def test_is_finding_graphql_scan():
+    hit, sev, _ = hunt._is_finding(
+        Lead("http://h/graphql", "graphql", "graphql_scan", ""),
+        "MEDIUM: GraphQL introspection enabled at http://h/graphql — schema disclosed (40 types).")
+    assert hit and sev == "medium"
+    assert not hunt._is_finding(Lead("http://h/", "graphql", "graphql_scan", ""),
+                                "no GraphQL endpoint found")[0]
+
+
 def test_seed_leads_security_headers_baseline():
     leads = hunt.seed_leads("http://localhost:3001", DIRB)
     assert any(l.tool == "security_headers" and l.url == "http://localhost:3001"

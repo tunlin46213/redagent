@@ -61,6 +61,7 @@ def seed_leads(base: str, dirb_output: str, crawl_output: str = "") -> list[Lead
         Lead(base, "misconfig", "nikto_scan", "server misconfig/outdated software", "medium"),
         Lead(base, "cors", "cors_check", "baseline CORS policy check", "medium"),
         Lead(base, "headers", "security_headers", "security header audit", "low"),
+        Lead(base, "graphql", "graphql_scan", "probe for GraphQL + introspection", "medium"),
     ]
     p = urlparse(base)
     if p.scheme == "https":
@@ -173,6 +174,9 @@ def _is_finding(lead: Lead, result: str) -> tuple[bool, str, str]:
         if r.startswith(("medium:", "low:")):
             sev = "medium" if r.startswith("medium:") else "low"
             return True, sev, "headers — " + result.replace("\n", "; ")[:220]
+    elif lead.tool == "graphql_scan":
+        if "medium:" in r:
+            return True, "medium", result.replace("\n", "; ")[:220]
     elif lead.tool == "fetch_url":
         if not result.startswith("HTTP 200"):
             return False, lead.severity, ""
