@@ -113,3 +113,11 @@ def test_scan_secrets_detects_high_signal():
 
 def test_scan_secrets_clean_text_empty():
     assert tools.scan_secrets("just an ordinary page with no secrets here") == []
+
+
+def test_naabu_ports_parses_and_dedups():
+    out = ("[INF] Running CONNECT scan\n"
+           "localhost:443\nlocalhost:80\nlocalhost:3001\nlocalhost:80\n"
+           "scanning...\nbadline\n")
+    assert tools._naabu_ports(out) == [80, 443, 3001]
+    assert tools._naabu_ports("[INF] no ports\n") == []

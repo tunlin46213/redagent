@@ -311,7 +311,7 @@ def run_hunt(target: str, cfg: Config, emit=print) -> None:
         findings = [Finding(**f) for f in entry["findings"]]
         seen = {tuple(k) for k in entry["done"]}
     else:
-        emit("[hunt] recon: nmap_web_scan + dir_bruteforce + web_crawl + web_fingerprint ...")
+        emit("[hunt] recon: nmap_web_scan + dir_bruteforce + web_crawl + web_fingerprint + port_scan ...")
         nmap = tools["nmap_web_scan"](host)
         if nmap.startswith("refused"):
             emit(f"[hunt] {nmap}")
@@ -327,6 +327,12 @@ def run_hunt(target: str, cfg: Config, emit=print) -> None:
             stack = ""
         elif stack:
             emit(f"[hunt] fingerprint: {stack}")
+        # naabu port sweep: surface services on non-standard ports. Best-effort —
+        # folded into the recon-context line so it is cached and shown in the report.
+        ports = tools["port_scan"](host)
+        if not ports.startswith(("refused", "error", "(")):
+            emit(f"[hunt] open ports: {ports}")
+            stack = (stack + " | " if stack else "") + f"open ports: {ports}"
 
     queue = seed_leads(base, dirb, crawl)
     # Fingerprint-driven lead: if httpx tags the app as WordPress, make sure the

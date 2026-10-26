@@ -99,6 +99,17 @@ def scan_secrets(text: str) -> list[tuple[str, str, str]]:
     return out
 
 
+def _naabu_ports(output: str) -> list[int]:
+    """Parse naabu's 'host:port' lines into a sorted unique port list, ignoring
+    its banner/log noise. Pure, so it is unit-tested directly."""
+    ports: set[int] = set()
+    for ln in output.splitlines():
+        m = re.match(r"^[^\s:]+:(\d{1,5})$", ln.strip())
+        if m and 0 < int(m.group(1)) <= 65535:
+            ports.add(int(m.group(1)))
+    return sorted(ports)
+
+
 def build_tools(cfg):
     WS: Path = cfg.workspace
     # The bundled curated list carries the deep, app-specific paths (e.g.
@@ -381,6 +392,22 @@ def build_tools(cfg):
             parts.append(f"type: {d['content_type']}")
         return " | ".join(parts)
 
+    def port_scan(host: str) -> str:
+        """Discover open TCP ports on an in-scope host with naabu (fast,
+        unprivileged connect scan of the top 1000 ports). Surfaces services on
+        non-standard ports that the fixed web-port nmap scan misses. Input: a
+        hostname or IP."""
+        try:
+            h = cfg.scope.check(host)
+        except ScopeError as e:
+            return f"refused (out of scope): {e}"
+        if not _have("naabu"):
+            return "error: naabu not installed (copy from the kali sandbox or `go install github.com/projectdiscovery/naabu/v2/cmd/naabu@latest`)"
+        out = _run(["naabu", "-host", h, "-s", "connect", "-tp", "1000", "-silent"],
+                   timeout=150)
+        ports = _naabu_ports(out)
+        return ", ".join(str(p) for p in ports) if ports else "(no open ports found)"
+
     def secret_scan(url: str) -> str:
         """Fetch an in-scope URL (e.g. an exposed .env / .bak / config / backup
         file) and scan its body for leaked secrets: private keys, cloud/API keys,
@@ -523,6 +550,6 @@ def build_tools(cfg):
         "web_fingerprint": web_fingerprint,
         "nikto_scan": nikto_scan, "wpscan_scan": wpscan_scan,
         "testssl_scan": testssl_scan, "jwt_test": jwt_test,
-        "secret_scan": secret_scan,
+        "secret_scan": secret_scan, "port_scan": port_scan,
         "read_file": read_file, "write_file": write_file,
     }
