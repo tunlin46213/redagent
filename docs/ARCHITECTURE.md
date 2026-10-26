@@ -60,8 +60,11 @@ target URL
   │
   ├─ scope.check + HTTP reachability probe      (fail fast if down / out of scope)
   │
+  ├─ _profile(target)  →  TargetProfile (domain | IP | host; http|https)
+  │
   ├─ cache?  reuse recon + findings if < hunt_cache_ttl, else:
-  │     recon:  nmap_web_scan + dir_bruteforce + web_crawl (katana) + web_fingerprint (httpx) + port_scan (naabu)
+  │     recon_plan(profile):  [domain→subdomain_scan] + port_scan + nmap_web_scan
+  │                           + dir_bruteforce + web_crawl + web_fingerprint
   │
   ├─ seed_leads()  →  severity-ordered queue
   │     search→sqli/xss, sensitive-200→exposure, base→vuln_scan/nikto,
@@ -82,6 +85,14 @@ target URL
 
 Key dataclasses in `hunt.py`: `Lead(url, vuln_class, tool, reason, severity)` and
 `Finding(vuln_class, url, severity, evidence)`.
+
+**Target routing:** `_profile(target)` classifies the target (real domain vs IP
+vs lab host; http vs https) and `recon_plan(profile)` is the single, testable
+source of truth for which recon tools run — subdomain enum only for a real
+domain, the web-recon set always. `seed_leads` adds content-driven routing on top
+(search→sqli/xss, https→testssl, wp-*→wpscan). This is the lightweight,
+deterministic analogue of redamon's `_classify_ip`/`ip_filter` routing — no
+LangGraph or containers, just a dataclass and a plan function.
 
 **Why deterministic:** the whole engagement plan (what to test, in what order,
 what to chain) lives in Python, not in the 7B's head — so it never thrashes,

@@ -6,6 +6,7 @@ prioritisation live here in Python — deterministic — so the small model neve
 to plan a multi-step engagement itself. Scope is still enforced inside every tool.
 """
 
+import ipaddress
 import json
 import re
 import time
@@ -15,7 +16,7 @@ from pathlib import Path
 from urllib.parse import urlparse, urljoin, parse_qsl
 
 from .config import Config
-from .tools import build_tools
+from .tools import build_tools, _is_enumerable_domain
 
 SEVERITY = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
 
@@ -47,6 +48,40 @@ def _base(target: str) -> str:
         target = "http://" + target
     p = urlparse(target)
     return f"{p.scheme}://{p.netloc}"
+
+
+@dataclass
+class TargetProfile:
+    """What the target IS — so recon runs the tools that fit its kind, not a
+    one-size-fits-all set (a real domain gets subdomain enum; an IP/lab host
+    does not; HTTPS gets a TLS check)."""
+    base: str
+    host: str
+    is_https: bool
+    is_ip: bool
+    is_domain: bool
+
+
+def _profile(target: str) -> TargetProfile:
+    base = _base(target)
+    p = urlparse(base)
+    host = p.hostname or ""
+    try:
+        ipaddress.ip_address(host)
+        is_ip = True
+    except ValueError:
+        is_ip = False
+    return TargetProfile(base=base, host=host, is_https=(p.scheme == "https"),
+                         is_ip=is_ip, is_domain=_is_enumerable_domain(host))
+
+
+def recon_plan(profile: TargetProfile) -> list[str]:
+    """The recon tools to run for this target type, in order — the single, testable
+    source of truth for recon routing. Subdomain enum only for a real domain; the
+    web-recon set always. TLS is routed by seed_leads off the https scheme."""
+    plan = ["subdomain_scan"] if profile.is_domain else []
+    return plan + ["port_scan", "nmap_web_scan", "dir_bruteforce",
+                   "web_crawl", "web_fingerprint"]
 
 
 def seed_leads(base: str, dirb_output: str, crawl_output: str = "") -> list[Lead]:
@@ -320,8 +355,12 @@ def run_hunt(target: str, cfg: Config, emit=print) -> None:
     tools = build_tools(cfg)
     base = _base(target)
     host = urlparse(base).hostname or ""
+    profile = _profile(base)
 
+    kind = "domain" if profile.is_domain else "IP" if profile.is_ip else "host"
     emit(f"[hunt] target: {base}")
+    emit(f"[hunt] profile: {profile.host} "
+         f"({'https' if profile.is_https else 'http'}; {kind})")
     # Fail fast + clearly if the target is in scope but not actually serving HTTP,
     # rather than running the whole worklist and reporting a misleading "0 findings".
     try:
@@ -376,6 +415,14 @@ def run_hunt(target: str, cfg: Config, emit=print) -> None:
         if not ports.startswith(("refused", "error", "(")):
             emit(f"[hunt] open ports: {ports}")
             stack = (stack + " | " if stack else "") + f"open ports: {ports}"
+        # Profile-routed: subdomain enum runs only for a real domain (recon_plan),
+        # never for an IP or a lab host. Discovered subs need scope before scanning.
+        if "subdomain_scan" in recon_plan(profile):
+            subs = tools["subdomain_scan"](profile.host)
+            if not subs.startswith(("refused", "error", "(")):
+                n = len(subs.splitlines())
+                emit(f"[hunt] subdomains: {n} found (passive OSINT)")
+                stack = (stack + " | " if stack else "") + f"subdomains: {n}"
 
     queue = seed_leads(base, dirb, crawl)
     # Fingerprint-driven lead: if httpx tags the app as WordPress, make sure the

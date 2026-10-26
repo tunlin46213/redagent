@@ -15,6 +15,27 @@ def test_base_normalises():
     assert hunt._base("http://h:3001/x") == "http://h:3001"
 
 
+def test_profile_classifies_target_kind():
+    dom = hunt._profile("https://shop.target.com")
+    assert dom.is_domain and dom.is_https and not dom.is_ip
+    ip = hunt._profile("http://10.0.0.5:8080")
+    assert ip.is_ip and not ip.is_domain and not ip.is_https
+    lab = hunt._profile("localhost:3001")
+    assert not lab.is_domain and not lab.is_ip     # lab host: neither
+
+
+def test_recon_plan_routes_subdomain_only_for_domains():
+    dom = hunt.recon_plan(hunt._profile("https://shop.target.com"))
+    assert dom[0] == "subdomain_scan"              # domain -> subdomain enum first
+    lab = hunt.recon_plan(hunt._profile("localhost:3001"))
+    ip = hunt.recon_plan(hunt._profile("http://10.0.0.5"))
+    assert "subdomain_scan" not in lab and "subdomain_scan" not in ip
+    # the web-recon set runs for every target kind
+    for plan in (dom, lab, ip):
+        assert {"port_scan", "nmap_web_scan", "dir_bruteforce",
+                "web_crawl", "web_fingerprint"} <= set(plan)
+
+
 def test_seed_leads_classes_and_severity_order():
     leads = hunt.seed_leads("http://localhost:3001", DIRB)
     classes = {l.vuln_class for l in leads}
