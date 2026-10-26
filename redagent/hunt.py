@@ -115,6 +115,27 @@ def seed_leads(base: str, dirb_output: str, crawl_output: str = "") -> list[Lead
                           f"crawled param endpoint {pu.path}", "high"))
         leads.append(Lead(u, "xss", "xss_test",
                           f"crawled reflected param {pu.path}", "medium"))
+    # Crawled URLs that carry a numeric object id -> IDOR/BOLA probes, deduped by
+    # endpoint template (the id slot replaced) so /api/Users/1,2,3 → one lead.
+    seen_idor: set[tuple[str, tuple[str, ...]]] = set()
+    for line in crawl_output.splitlines():
+        u = line.strip()
+        if not u.startswith(("http://", "https://")):
+            continue
+        pu = urlparse(u)
+        if pu.netloc != base_netloc:
+            continue
+        tmpl = re.sub(r"/\d+", "/{id}", pu.path)
+        q_keys = tuple(sorted(k for k, _ in parse_qsl(pu.query)))
+        has_id = tmpl != pu.path or any(v.isdigit() for _, v in parse_qsl(pu.query))
+        if not has_id:
+            continue
+        sig = (tmpl, q_keys)
+        if sig in seen_idor:
+            continue
+        seen_idor.add(sig)
+        leads.append(Lead(u, "idor", "idor_probe",
+                          f"numeric object ref in {pu.path}", "medium"))
     leads.sort(key=lambda l: SEVERITY.get(l.severity, 2))
     return leads
 
@@ -177,6 +198,10 @@ def _is_finding(lead: Lead, result: str) -> tuple[bool, str, str]:
     elif lead.tool == "graphql_scan":
         if "medium:" in r:
             return True, "medium", result.replace("\n", "; ")[:220]
+    elif lead.tool == "idor_probe":
+        if r.startswith(("high:", "low:")):
+            sev = "high" if r.startswith("high:") else "low"
+            return True, sev, "IDOR — " + result.replace("\n", "; ")[:220]
     elif lead.tool == "fetch_url":
         if not result.startswith("HTTP 200"):
             return False, lead.severity, ""

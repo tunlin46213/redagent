@@ -119,6 +119,57 @@ def _cors_verdict(sent_origin: str, acao: str | None, acac: str | None) -> str |
     return None
 
 
+def _neighbour_ids(oid: int) -> list[int]:
+    return [i for i in dict.fromkeys([oid, oid + 1, oid - 1, oid + 2]) if i > 0]
+
+
+def _vary_id(url: str):
+    """Find a numeric object id in a URL (a numeric query value, else the last
+    numeric path segment) and return (list[(id, varied_url)], original_id), or
+    (None, 0) if there is none. Pure/testable."""
+    p = urlparse(url)
+    q = parse_qsl(p.query, keep_blank_values=True)
+    for i, (k, v) in enumerate(q):
+        if v.isdigit():
+            oid = int(v)
+            out = []
+            for nid in _neighbour_ids(oid):
+                nq = q.copy()
+                nq[i] = (k, str(nid))
+                out.append((nid, urlunparse(p._replace(query=urlencode(nq)))))
+            return out, oid
+    segs = p.path.split("/")
+    for i in range(len(segs) - 1, -1, -1):
+        if segs[i].isdigit():
+            oid = int(segs[i])
+            out = []
+            for nid in _neighbour_ids(oid):
+                ns = segs.copy()
+                ns[i] = str(nid)
+                out.append((nid, urlunparse(p._replace(path="/".join(ns)))))
+            return out, oid
+    return None, 0
+
+
+_IDOR_SENSITIVE = ("email", "password", "passwordhash", "token", "role",
+                   "apitoken", "ssn", "iban", "creditcard", "address")
+
+
+def _idor_verdict(samples: list[tuple[int, int, str]]) -> tuple[str, str] | None:
+    """samples: (id, status, body) per probed id. If >=2 ids return distinct 200
+    objects, it is enumerable -> HIGH when a body carries sensitive fields, else
+    LOW. Returns (severity, label) or None. Pure/testable."""
+    ok = [(i, b) for (i, st, b) in samples if st == 200 and b.strip()]
+    if len(ok) < 2 or len({b for _, b in ok}) < 2:
+        return None
+    ids = ", ".join(str(i) for i, _ in sorted(ok))
+    sensitive = any(any(f in b.lower() for f in _IDOR_SENSITIVE) for _, b in ok)
+    kind = "sensitive data" if sensitive else "distinct objects"
+    return (("high" if sensitive else "low"),
+            f"object refs enumerable by id (possible IDOR/BOLA) — ids {ids} "
+            f"each returned {kind} with no access-control check")
+
+
 def _is_graphql_response(resp) -> bool:
     """True if a parsed JSON response looks like a GraphQL reply (so an HTML SPA
     catch-all returning 200 is NOT mistaken for a GraphQL endpoint). Pure."""
@@ -479,6 +530,40 @@ def build_tools(cfg):
         ports = _naabu_ports(out)
         return ", ".join(str(p) for p in ports) if ports else "(no open ports found)"
 
+    def idor_probe(url: str) -> str:
+        """Test an in-scope object-reference URL for IDOR / broken object-level
+        authorization: fetch the numeric id in the URL and its neighbours; if
+        several ids return distinct 200 objects with no auth, the endpoint
+        enumerates objects by id. Input: a URL with a numeric id in the path or
+        query, e.g. http://host/api/Users/1 or http://host/rest/basket?id=3."""
+        try:
+            cfg.scope.check(url)
+        except ScopeError as e:
+            return f"refused (out of scope): {e}"
+        varied, _oid = _vary_id(url)
+        if not varied:
+            return "error: no numeric id in the URL to vary (e.g. .../api/Users/1 or ?id=1)"
+        samples = []
+        for nid, nurl in varied:
+            try:
+                cfg.scope.check(nurl)
+            except ScopeError:
+                continue
+            req = urllib.request.Request(nurl, headers={"User-Agent": "redagent"})
+            try:
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    samples.append((nid, r.status,
+                                    r.read(4000).decode("utf-8", "replace")))
+            except urllib.error.HTTPError as e:
+                samples.append((nid, e.code, ""))
+            except Exception:
+                samples.append((nid, 0, ""))
+        verdict = _idor_verdict(samples)
+        if not verdict:
+            return "no IDOR indicator (ids did not enumerate distinct objects)"
+        sev, label = verdict
+        return f"{sev.upper()}: {label}"
+
     def graphql_scan(url: str) -> str:
         """Probe an in-scope URL for a GraphQL endpoint and check whether schema
         introspection is enabled (schema disclosure aids further attacks). Input: a
@@ -723,5 +808,6 @@ def build_tools(cfg):
         "testssl_scan": testssl_scan, "jwt_test": jwt_test,
         "secret_scan": secret_scan, "port_scan": port_scan, "cors_check": cors_check,
         "security_headers": security_headers, "graphql_scan": graphql_scan,
+        "idor_probe": idor_probe,
         "read_file": read_file, "write_file": write_file,
     }

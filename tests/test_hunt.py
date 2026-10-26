@@ -95,6 +95,30 @@ def test_seed_leads_cors_baseline_and_auth():
     assert any("login" in l.url and l.severity == "high" for l in cors)
 
 
+def test_seed_leads_idor_from_crawled_ids():
+    crawl = "\n".join([
+        "http://localhost:3001/api/Users/1",     # path id -> idor
+        "http://localhost:3001/api/Users/2",     # same template -> deduped
+        "http://localhost:3001/rest/basket?id=3",  # query id -> idor
+        "http://localhost:3001/about",           # no id -> ignored
+    ])
+    leads = hunt.seed_leads("http://localhost:3001", "", crawl)
+    idor = [l for l in leads if l.tool == "idor_probe"]
+    # one per template: /api/Users/{id} and /rest/basket?id=
+    assert len(idor) == 2
+    assert any("/api/Users/" in l.url for l in idor)
+    assert any("basket" in l.url for l in idor)
+
+
+def test_is_finding_idor_probe():
+    hit, sev, ev = hunt._is_finding(
+        Lead("http://h/api/Users/1", "idor", "idor_probe", ""),
+        "HIGH: object refs enumerable by id (possible IDOR/BOLA) — ids 1, 2 ...")
+    assert hit and sev == "high" and "IDOR" in ev
+    assert not hunt._is_finding(Lead("http://h/x/1", "idor", "idor_probe", ""),
+                                "no IDOR indicator (ids did not enumerate distinct objects)")[0]
+
+
 def test_seed_leads_graphql_baseline():
     leads = hunt.seed_leads("http://localhost:3001", DIRB)
     assert any(l.tool == "graphql_scan" and l.vuln_class == "graphql" for l in leads)

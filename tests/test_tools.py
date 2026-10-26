@@ -175,3 +175,21 @@ def test_graphql_type_count():
     assert tools._graphql_type_count(resp) == 2
     assert tools._graphql_type_count({"data": {}}) is None
     assert tools._graphql_type_count(None) is None
+
+
+def test_vary_id_path_and_query():
+    varied, oid = tools._vary_id("http://h/api/Users/5")
+    assert oid == 5 and ("http://h/api/Users/6" in [u for _, u in varied])
+    varied2, oid2 = tools._vary_id("http://h/rest/basket?id=3&x=a")
+    assert oid2 == 3 and any("id=4" in u for _, u in varied2)
+    assert tools._vary_id("http://h/api/Users/me") == (None, 0)
+
+
+def test_idor_verdict_sensitive_is_high_public_is_low():
+    sensitive = [(1, 200, '{"email":"a@x"}'), (2, 200, '{"email":"b@x"}')]
+    assert tools._idor_verdict(sensitive)[0] == "high"
+    public = [(1, 200, '{"name":"Apple"}'), (2, 200, '{"name":"Banana"}')]
+    assert tools._idor_verdict(public)[0] == "low"
+    # identical bodies or 401s -> no indicator
+    assert tools._idor_verdict([(1, 200, "same"), (2, 200, "same")]) is None
+    assert tools._idor_verdict([(1, 401, ""), (2, 401, "")]) is None

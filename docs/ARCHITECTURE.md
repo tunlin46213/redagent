@@ -23,7 +23,7 @@ Two models work together:
 | `config.py` | 76 | Loads `config.yaml` → a `Config` object (model, scope, workspace, options). |
 | `scope.py` | 88 | The RoE guard. `Scope.check(target)` — allow / refuse, placeholder detection. |
 | `llm.py` | 17 | Builds the Ollama (OpenAI-compatible) client for the tool model. |
-| `tools.py` | 600 | The 22 tools. `build_tools(cfg)` returns `{name: fn}`, each scope-checked. |
+| `tools.py` | 640 | The 23 tools. `build_tools(cfg)` returns `{name: fn}`, each scope-checked. |
 | `agents.py` | 133 | AutoGen agent definitions: the operator + the recon/web/reporter team. |
 | `modes.py` | 171 | `task` / `team` / `chat` runners + intent routing (advice, exploit). |
 | `hunt.py` | 431 | The deterministic worklist engine (recon → leads → chain → report). |
@@ -92,7 +92,7 @@ garbles tool calls, or skips the SQLi endpoint.
 ## Tools (`tools.py` → `build_tools(cfg)`)
 
 Every tool calls `cfg.scope.check()` first and returns `"refused (out of scope)"`
-otherwise. The 22 tools:
+otherwise. The 23 tools:
 
 | Tool | Backend | Purpose |
 |------|---------|---------|
@@ -116,6 +116,7 @@ otherwise. The 22 tools:
 | `cors_check` | pure-python | Probe CORS: reflected/null Origin + credentials = cross-site theft |
 | `security_headers` | pure-python | Audit CSP/HSTS/X-Frame/etc. + info-disclosure headers |
 | `graphql_scan` | pure-python | Detect a GraphQL endpoint + flag enabled schema introspection |
+| `idor_probe` | pure-python | Vary a numeric object id — enumerable distinct objects = IDOR/BOLA |
 | `read_file` / `write_file` | — | Workspace notes/reports |
 
 The optional binaries (katana, httpx, naabu, nikto, wpscan, testssl) need not be installed; a tool returns
