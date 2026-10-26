@@ -308,6 +308,41 @@ def build_tools(cfg):
             (params if p.query else other).append(u)
         return "\n".join(params + other)[:3000] or "(no endpoints crawled)"
 
+    def web_fingerprint(url: str) -> str:
+        """Fingerprint an in-scope web endpoint with httpx: status, title, server,
+        and detected technologies (CMS/frameworks/languages). Input: a base URL.
+        One concise line — use it to orient an engagement and pick targeted tools."""
+        try:
+            cfg.scope.check(url)
+        except ScopeError as e:
+            return f"refused (out of scope): {e}"
+        if not _have("httpx"):
+            return "error: httpx not installed (copy from the kali sandbox or `go install github.com/projectdiscovery/httpx/cmd/httpx@latest`)"
+        try:
+            p = subprocess.run(
+                ["httpx", "-u", url, "-json", "-silent", "-nc", "-td", "-title",
+                 "-server", "-sc"],
+                capture_output=True, text=True, timeout=60, cwd=WS)
+        except subprocess.TimeoutExpired:
+            return "error: httpx timed out"
+        out = (p.stdout or "").strip().splitlines()
+        if not out:
+            return "(no response)"
+        try:
+            d = json.loads(out[0])
+        except json.JSONDecodeError:
+            return "(fingerprint failed)"
+        parts = [f"HTTP {d.get('status_code', '?')}"]
+        if d.get("title"):
+            parts.append(f"title: {d['title']}")
+        if d.get("webserver"):
+            parts.append(f"server: {d['webserver']}")
+        if d.get("tech"):
+            parts.append("tech: " + ", ".join(d["tech"]))
+        if d.get("content_type"):
+            parts.append(f"type: {d['content_type']}")
+        return " | ".join(parts)
+
     def read_file(path: str) -> str:
         """Read a text file from the workspace. Input: a relative filename."""
         try:
@@ -423,6 +458,7 @@ def build_tools(cfg):
         "nmap_web_scan": nmap_web_scan, "dir_bruteforce": dir_bruteforce,
         "sql_test": sql_test, "sql_enumerate": sql_enumerate,
         "vuln_scan": vuln_scan, "xss_test": xss_test, "web_crawl": web_crawl,
+        "web_fingerprint": web_fingerprint,
         "nikto_scan": nikto_scan, "wpscan_scan": wpscan_scan,
         "testssl_scan": testssl_scan, "jwt_test": jwt_test,
         "read_file": read_file, "write_file": write_file,

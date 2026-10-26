@@ -142,3 +142,10 @@ def test_report_severity_ordered():
     rep = hunt._report("http://h", findings)
     assert rep.index("Critical") < rep.index("Medium")
     assert "worst severity: critical" in rep
+
+
+def test_report_includes_stack_when_given():
+    rep = hunt._report("http://h", [], "HTTP 200 | title: Shop | tech: nginx, PHP")
+    assert "**Stack:** HTTP 200 | title: Shop | tech: nginx, PHP" in rep
+    # omitted when empty (unchanged report shape)
+    assert "**Stack:**" not in hunt._report("http://h", [])

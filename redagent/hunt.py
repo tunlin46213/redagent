@@ -296,22 +296,34 @@ def run_hunt(target: str, cfg: Config, emit=print) -> None:
              f"({age}m old; set hunt_cache_ttl: 0 for a fresh scan).")
         dirb = entry["dirb"]
         crawl = entry.get("crawl", "")
+        stack = entry.get("stack", "")
         findings = [Finding(**f) for f in entry["findings"]]
         seen = {tuple(k) for k in entry["done"]}
     else:
-        emit("[hunt] recon: nmap_web_scan + dir_bruteforce + web_crawl ...")
+        emit("[hunt] recon: nmap_web_scan + dir_bruteforce + web_crawl + web_fingerprint ...")
         nmap = tools["nmap_web_scan"](host)
         if nmap.startswith("refused"):
             emit(f"[hunt] {nmap}")
             return
         dirb = tools["dir_bruteforce"](base)
-        # katana crawl is best-effort extra coverage; a missing binary or error
-        # must not abort the hunt, so swallow anything that isn't real URLs.
+        # katana crawl + httpx fingerprint are best-effort extra context; a missing
+        # binary or error must not abort the hunt, so swallow anything unusable.
         crawl = tools["web_crawl"](base)
         if crawl.startswith(("refused", "error", "(no")):
             crawl = ""
+        stack = tools["web_fingerprint"](base)
+        if stack.startswith(("refused", "error", "(")):
+            stack = ""
+        elif stack:
+            emit(f"[hunt] fingerprint: {stack}")
 
     queue = seed_leads(base, dirb, crawl)
+    # Fingerprint-driven lead: if httpx tags the app as WordPress, make sure the
+    # WordPress scan runs even when recon paths didn't reveal wp-* endpoints.
+    if "wordpress" in stack.lower() and not any(l.tool == "wpscan_scan" for l in queue):
+        queue.append(Lead(base, "wordpress", "wpscan_scan",
+                          "httpx fingerprint: WordPress", "high"))
+        queue.sort(key=lambda l: SEVERITY.get(l.severity, 2))
     token = _authenticate(cfg, base)
     if token:
         emit(f"[hunt] authenticated — captured session JWT ({token[:18]}...)")
@@ -361,7 +373,7 @@ def run_hunt(target: str, cfg: Config, emit=print) -> None:
     if getattr(cfg, "deep_dive", False) and findings:
         deepdive_md = _deep_dive(cfg, base, tools, findings, seen, emit)
 
-    report = _report(base, findings)
+    report = _report(base, findings, stack)
     # Phase-batched analyst pass: all tool work is done, so loading the analyst
     # model now costs at most one model swap (no interleaving). Best-effort.
     if findings:
@@ -387,6 +399,7 @@ def run_hunt(target: str, cfg: Config, emit=print) -> None:
             "ts": entry["ts"] if fresh else time.time(),
             "dirb": dirb,
             "crawl": crawl,
+            "stack": stack,
             "findings": [asdict(f) for f in findings],
             "done": sorted(list(k) for k in seen),
         }
@@ -449,11 +462,13 @@ def _deep_dive(cfg, base, tools, findings, seen, emit) -> str:
     return md
 
 
-def _report(base: str, findings: list[Finding]) -> str:
+def _report(base: str, findings: list[Finding], stack: str = "") -> str:
     findings = sorted(findings, key=lambda f: SEVERITY.get(f.severity, 2))
     worst = findings[0].severity if findings else "none"
     lines = [f"# Engagement report — {base}", "",
              f"**Summary:** {len(findings)} finding(s); worst severity: {worst}.", ""]
+    if stack:
+        lines += [f"**Stack:** {stack}", ""]
     for f in findings:
         lines += [f"### {f.vuln_class.upper()} — {f.url}",
                   f"- Severity: {f.severity.capitalize()}",
