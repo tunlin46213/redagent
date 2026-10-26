@@ -23,7 +23,7 @@ Two models work together:
 | `config.py` | 76 | Loads `config.yaml` → a `Config` object (model, scope, workspace, options). |
 | `scope.py` | 88 | The RoE guard. `Scope.check(target)` — allow / refuse, placeholder detection. |
 | `llm.py` | 17 | Builds the Ollama (OpenAI-compatible) client for the tool model. |
-| `tools.py` | 455 | The 17 tools. `build_tools(cfg)` returns `{name: fn}`, each scope-checked. |
+| `tools.py` | 505 | The 18 tools. `build_tools(cfg)` returns `{name: fn}`, each scope-checked. |
 | `agents.py` | 133 | AutoGen agent definitions: the operator + the recon/web/reporter team. |
 | `modes.py` | 171 | `task` / `team` / `chat` runners + intent routing (advice, exploit). |
 | `hunt.py` | 431 | The deterministic worklist engine (recon → leads → chain → report). |
@@ -70,7 +70,7 @@ target URL
   ├─ for each lead (skip ones already done, per cache):
   │     run ONE tool  →  _is_finding()?  →  record
   │     derive_followups():  SQLi→sql_enumerate (dump tables),
-  │                          /ftp listing→fetch each sensitive file,
+  │                          /ftp listing→fetch each sensitive file, exposed file→secret_scan,
   │     any result with a JWT →  chain jwt_test
   │
   ├─ deep_dive (opt-in):  DeepHat proposes tests → engine runs → DeepHat reviews
@@ -92,7 +92,7 @@ garbles tool calls, or skips the SQLi endpoint.
 ## Tools (`tools.py` → `build_tools(cfg)`)
 
 Every tool calls `cfg.scope.check()` first and returns `"refused (out of scope)"`
-otherwise. The 17 tools:
+otherwise. The 18 tools:
 
 | Tool | Backend | Purpose |
 |------|---------|---------|
@@ -111,6 +111,7 @@ otherwise. The 17 tools:
 | `wpscan_scan` | wpscan | WordPress-specific |
 | `testssl_scan` | testssl | TLS/HTTPS config |
 | `jwt_test` | pure-python | Decode JWT + flag alg:none / weak HMAC secret |
+| `secret_scan` | pure-python | Fetch an exposed file + flag leaked keys/tokens/JWTs/creds |
 | `read_file` / `write_file` | — | Workspace notes/reports |
 
 The optional binaries (katana, httpx, nikto, wpscan, testssl) need not be installed; a tool returns

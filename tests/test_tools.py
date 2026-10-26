@@ -94,3 +94,22 @@ def test_no_placeholder_host_in_tool_docstrings():
         doc = (fn.__doc__ or "").lower()
         for ph in ("example.com", "example.org", "example.net", "yourhost", "yourdomain"):
             assert ph not in doc, f"{name} docstring leaks placeholder host {ph!r}"
+
+
+def test_scan_secrets_detects_high_signal():
+    text = (
+        "-----BEGIN RSA PRIVATE KEY-----\nMIIabc\n-----END RSA PRIVATE KEY-----\n"
+        "aws_key = AKIAIOSFODNN7EXAMPLE\n"
+        "api_key: 's3cr3tValue123'\n"
+    )
+    hits = tools.scan_secrets(text)
+    labels = {label for _, label, _ in hits}
+    assert "private key" in labels
+    assert "AWS access key id" in labels
+    assert "credential assignment" in labels
+    # samples are redacted, never the raw secret
+    assert all("AKIAIOSFODNN7EXAMPLE" not in s for _, _, s in hits)
+
+
+def test_scan_secrets_clean_text_empty():
+    assert tools.scan_secrets("just an ordinary page with no secrets here") == []

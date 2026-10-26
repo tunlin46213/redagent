@@ -61,6 +61,44 @@ def _nmap_trim(out: str) -> str:
     return "\n".join(kept).rstrip()
 
 
+# High-signal secret patterns (severity, label, regex). Kept deliberately tight —
+# a pentest wants real leaks (keys/tokens), not every form field named "password".
+_SECRET_PATTERNS = [
+    ("critical", "private key",
+     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----")),
+    ("critical", "AWS access key id", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("critical", "Google API key", re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b")),
+    ("high", "GitHub token", re.compile(r"\bgh[pousr]_[0-9A-Za-z]{36}\b")),
+    ("high", "GitHub PAT", re.compile(r"\bgithub_pat_[0-9A-Za-z_]{22,}\b")),
+    ("high", "Slack token", re.compile(r"\bxox[baprs]-[0-9A-Za-z-]{10,}\b")),
+    ("high", "Slack webhook", re.compile(r"https://hooks\.slack\.com/services/[A-Za-z0-9/]+")),
+    ("high", "Stripe secret key", re.compile(r"\bsk_live_[0-9A-Za-z]{24,}\b")),
+    ("high", "JWT", re.compile(r"\beyJ[\w-]+\.eyJ[\w-]+\.[\w-]+")),
+    ("medium", "credential assignment", re.compile(
+        r"(?i)(?:api[_-]?key|secret|password|passwd|token)\s*[:=]\s*[\"']?[A-Za-z0-9/+=_\-]{8,}")),
+]
+
+
+def _redact(s: str) -> str:
+    s = s.strip().strip("\"'")
+    return f"{s[:4]}…{s[-2:]}" if len(s) > 8 else f"{s[:2]}…"
+
+
+def scan_secrets(text: str) -> list[tuple[str, str, str]]:
+    """Scan text for leaked secrets. Returns distinct (severity, label, redacted)
+    tuples — pure, side-effect-free, so it is unit-tested directly."""
+    out: list[tuple[str, str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for sev, label, rx in _SECRET_PATTERNS:
+        for m in rx.finditer(text):
+            sample = m.group(0)
+            if (label, sample) in seen:
+                continue
+            seen.add((label, sample))
+            out.append((sev, label, _redact(sample)))
+    return out
+
+
 def build_tools(cfg):
     WS: Path = cfg.workspace
     # The bundled curated list carries the deep, app-specific paths (e.g.
@@ -343,6 +381,30 @@ def build_tools(cfg):
             parts.append(f"type: {d['content_type']}")
         return " | ".join(parts)
 
+    def secret_scan(url: str) -> str:
+        """Fetch an in-scope URL (e.g. an exposed .env / .bak / config / backup
+        file) and scan its body for leaked secrets: private keys, cloud/API keys,
+        tokens, JWTs, credential assignments. Input: a full in-scope URL. Run it on
+        a sensitive file an engagement already found readable."""
+        try:
+            cfg.scope.check(url)
+        except ScopeError as e:
+            return f"refused (out of scope): {e}"
+        req = urllib.request.Request(url, headers={"User-Agent": "redagent"})
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                body = r.read(200000).decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            body = e.read(200000).decode("utf-8", "replace")
+        except Exception as e:
+            return f"fetch error: {e}"
+        hits = scan_secrets(body)
+        if not hits:
+            return "no secrets found"
+        # Label each line CRITICAL:/HIGH:/MEDIUM: so hunt._is_finding can grade it.
+        return "\n".join(f"{sev.upper()}: {label} ({sample})"
+                         for sev, label, sample in hits[:20])
+
     def read_file(path: str) -> str:
         """Read a text file from the workspace. Input: a relative filename."""
         try:
@@ -461,5 +523,6 @@ def build_tools(cfg):
         "web_fingerprint": web_fingerprint,
         "nikto_scan": nikto_scan, "wpscan_scan": wpscan_scan,
         "testssl_scan": testssl_scan, "jwt_test": jwt_test,
+        "secret_scan": secret_scan,
         "read_file": read_file, "write_file": write_file,
     }

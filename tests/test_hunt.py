@@ -87,6 +87,36 @@ def test_exposure_labels_content_aware():
     assert "Prometheus" in ev3
 
 
+def test_is_finding_secret_scan():
+    hit, sev, ev = hunt._is_finding(
+        Lead("http://h/.env", "secret", "secret_scan", ""),
+        "CRITICAL: private key (----…EY)")
+    assert hit and sev == "critical" and "leaked secret" in ev
+    # a clean scan is not a finding
+    assert not hunt._is_finding(Lead("http://h/x", "secret", "secret_scan", ""),
+                                "no secrets found")[0]
+
+
+def test_chain_exposure_to_secret_scan():
+    # a readable exposed file -> secret_scan lead on the same url
+    lead = Lead("http://h/ftp/package.json.bak", "exposure", "fetch_url", "", "high")
+    fu = hunt.derive_followups(lead, Finding("exposure", lead.url, "high", "x"),
+                               "http://h", "HTTP 200\n\n{...}")
+    assert len(fu) == 1 and fu[0].tool == "secret_scan" and fu[0].url == lead.url
+    # a directory listing is NOT secret-scanned (it fetches files instead)
+    import redagent.hunt as _h
+    orig = _h._list_links
+    _h._list_links = lambda u: []
+    try:
+        fu2 = hunt.derive_followups(
+            Lead("http://h/ftp", "exposure", "fetch_url", "", "high"),
+            Finding("exposure", "http://h/ftp", "high", "l"),
+            "http://h", "listing directory /ftp")
+    finally:
+        _h._list_links = orig
+    assert not any(l.tool == "secret_scan" for l in fu2)
+
+
 def test_chain_sqli_to_enumerate():
     lead = Lead("http://h/rest/products/search?q=apple", "sqli", "sql_test", "", "high")
     fu = hunt.derive_followups(lead, Finding("sqli", lead.url, "critical", "x"),

@@ -154,6 +154,11 @@ def _is_finding(lead: Lead, result: str) -> tuple[bool, str, str]:
         if "critical:" in r or "high:" in r:
             return True, "critical" if "critical:" in r else "high", \
                 result.replace("\n", " ")[:200]
+    elif lead.tool == "secret_scan":
+        if "critical:" in r or "high:" in r or "medium:" in r:
+            sev = ("critical" if "critical:" in r
+                   else "high" if "high:" in r else "medium")
+            return True, sev, "leaked secret — " + result.replace("\n", "; ")[:220]
     elif lead.tool == "fetch_url":
         if not result.startswith("HTTP 200"):
             return False, lead.severity, ""
@@ -211,6 +216,12 @@ def derive_followups(lead: Lead, finding: Finding, base: str, result: str) -> li
             seen_links.add(target)
             out.append(Lead(target, "exposure", "fetch_url",
                             f"sensitive file listed under {urlparse(lead.url).path}", "high"))
+    elif lead.vuln_class == "exposure":
+        # A readable exposed file/endpoint (not a directory listing) -> scan its
+        # body for leaked secrets. Each file fetched out of a listing above is
+        # itself an 'exposure' fetch_url lead, so this chains per-file too.
+        out.append(Lead(lead.url, "secret", "secret_scan",
+                        f"scan exposed {urlparse(lead.url).path} for leaked secrets", "high"))
     return out
 
 
