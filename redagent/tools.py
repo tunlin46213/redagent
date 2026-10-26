@@ -6,6 +6,7 @@ tool that takes a URL/host calls cfg.scope.check() first and refuses otherwise.
 import re
 import json
 import shutil
+import ipaddress
 import subprocess
 import urllib.request
 import urllib.error
@@ -117,6 +118,19 @@ def _cors_verdict(sent_origin: str, acao: str | None, acac: str | None) -> str |
         return ("MEDIUM: Access-Control-Allow-Origin: * — responses are world-readable"
                 + (" WITH credentials (invalid+dangerous)." if creds else " (no credentials)."))
     return None
+
+
+def _is_enumerable_domain(host: str) -> bool:
+    """False for localhost / IP literals (subdomain enum needs a real registered
+    domain, not an address or a lab host). Pure/testable."""
+    host = host.strip().lower().rstrip(".")
+    if not host or host == "localhost" or host.endswith((".local", ".localdomain")):
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return False
+    except ValueError:
+        return "." in host
 
 
 def _neighbour_ids(oid: int) -> list[int]:
@@ -530,6 +544,24 @@ def build_tools(cfg):
         ports = _naabu_ports(out)
         return ", ".join(str(p) for p in ports) if ports else "(no open ports found)"
 
+    def subdomain_scan(domain: str) -> str:
+        """Passively enumerate subdomains of an in-scope DOMAIN with subfinder
+        (OSINT sources — it does not touch the hosts). Input: the engagement's bare
+        root domain. Only meaningful for a real-domain engagement, not localhost or
+        an IP. Discovered subdomains still need to be in scope before scanning."""
+        try:
+            host = cfg.scope.check(domain)
+        except ScopeError as e:
+            return f"refused (out of scope): {e}"
+        if not _is_enumerable_domain(host):
+            return "error: subdomain enumeration needs a real domain (not localhost or an IP)"
+        if not _have("subfinder"):
+            return "error: subfinder not installed (copy from the kali sandbox or `go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest`)"
+        out = _run(["subfinder", "-d", host, "-silent"], timeout=120)
+        subs = sorted({ln.strip() for ln in out.splitlines()
+                       if ln.strip().endswith(host) and " " not in ln.strip()})
+        return "\n".join(subs)[:3000] if subs else "(no subdomains found)"
+
     def idor_probe(url: str) -> str:
         """Test an in-scope object-reference URL for IDOR / broken object-level
         authorization: fetch the numeric id in the URL and its neighbours; if
@@ -808,6 +840,6 @@ def build_tools(cfg):
         "testssl_scan": testssl_scan, "jwt_test": jwt_test,
         "secret_scan": secret_scan, "port_scan": port_scan, "cors_check": cors_check,
         "security_headers": security_headers, "graphql_scan": graphql_scan,
-        "idor_probe": idor_probe,
+        "idor_probe": idor_probe, "subdomain_scan": subdomain_scan,
         "read_file": read_file, "write_file": write_file,
     }

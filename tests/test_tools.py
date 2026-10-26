@@ -193,3 +193,21 @@ def test_idor_verdict_sensitive_is_high_public_is_low():
     # identical bodies or 401s -> no indicator
     assert tools._idor_verdict([(1, 200, "same"), (2, 200, "same")]) is None
     assert tools._idor_verdict([(1, 401, ""), (2, 401, "")]) is None
+
+
+def test_is_enumerable_domain():
+    assert tools._is_enumerable_domain("example.com")
+    assert tools._is_enumerable_domain("sub.target.co.uk")
+    assert not tools._is_enumerable_domain("localhost")
+    assert not tools._is_enumerable_domain("127.0.0.1")
+    assert not tools._is_enumerable_domain("10.0.0.5")
+    assert not tools._is_enumerable_domain("box.local")
+
+
+def test_subdomain_scan_rejects_non_domain(tmp_path):
+    cfg = types.SimpleNamespace(
+        scope=Scope(["localhost", "127.0.0.1"]), workspace=str(tmp_path),
+        tool_timeout=5, wordlist="")
+    t = tools.build_tools(cfg)
+    # localhost is in scope but not a real domain -> clear error, no network
+    assert "needs a real domain" in t["subdomain_scan"]("localhost")
